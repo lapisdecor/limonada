@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Limonada
+GenericName=Lemmy client
+Comment=Browse, search, vote and comment on Lemmy
+# The binary name, which is what the .deb installs into /usr/bin.
+Exec=limonada
+Icon=com.gatochalupa.limonada
+Terminal=false
+Categories=Network;News;
+# `StartupWMClass` matches the app id the binary sets
+# (`with_app_id("com.gatochalupa.limonada")`), which is what ties a running
+# window to this entry on Wayland and X11.
+StartupWMClass=com.gatochalupa.limonada
+Keywords=lemmy;feddit;fediverse;link aggregator;activitypub;

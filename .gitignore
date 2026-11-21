@@ -1,0 +1,37 @@
+# Everything the build and the packaging scripts produce lands under target/:
+# cargo's own output, cargo-deb's tree, the AppImage AppDir, the flatpak-builder
+# state and repo, the snap's staged copy of the sources, and every finished
+# artifact (.deb, .AppImage, .flatpak, .snap, .zip). One line covers all of it,
+# and `make clean` removes it too.
+/target
+
+# flatpak-builder's default state directory, created when a build runs without
+# packaging/build-flatpak.sh (which points it at target/flatpak instead).
+/.flatpak-builder
+
+# Freebuff's per-project marker: tool state, never source.
+/.freebuff
+
+# appimagetool, downloaded into the checkout as packaging/build-appimage.sh's
+# error message suggests when it is not already on PATH.
+/appimagetool
+
+# Rust leaves these behind when an interrupted build or an editor save breaks
+# the tree.
+**/*.rs.bk
+
+# Editor and OS scratch.
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Scratch images: screenshots and downloads are not source. Two kinds of PNG
+# are, and both are included by path, so an ignored file cannot break a build
+# after a fresh clone:
+#   - the 256x256 icon that cargo-deb, the AppImage, the snap and the Flatpak
+#     each read from the tree;
+#   - captured test pictures, which tests pull in with include_bytes!.
+*.png
+!packaging/icons/*.png
+!fixtures/**/*.png

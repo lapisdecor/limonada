@@ -1,0 +1,71 @@
+# Snap manifest for Limonada.
+#
+# Build with `make snap` (packaging/build-snap.sh), which stages a clean copy of
+# the sources in target/snap/project and runs `snapcraft pack` there — this
+# repository's target/ is tens of gigabytes, and snapcraft copies every source it
+# is given into parts/ wholesale. See packaging/README.md for what was measured.
+name: limonada
+# core26 is Ubuntu 26.04, which is what the app is developed and verified on. A
+# base is a runtime the host's snapd brings, so the snap runs on older
+# distributions too.
+base: core26
+# This manifest is the single source of the snap's metadata: the part installs no
+# AppStream file, because snapcraft would only use it to fill fields that are
+# declared here anyway. Keep this version in step with Cargo.toml — the build
+# script refuses to run when the two disagree.
+version: "0.2.0"
+title: Limonada
+summary: A native desktop client for Lemmy
+# What the AppStream metadata declares, and for the same reason: a built binary
+# includes the AVIF decoder, and `zenavif` and the `rav1d-safe` decoder beneath it
+# are AGPL-3.0-only, so no later version can be granted for the artifact as
+# distributed (the project itself is AGPL-3.0-or-later).
+license: AGPL-3.0-only
+# `contact`, `website`, `source-code` and `issues` are deliberately absent: this
+# repository has no public address, and inventing one would put a link that 404s
+# in every software centre that reads this metadata — the same measured decision
+# as the AppStream file's missing homepage URL. They are needed before publishing.
+description: |
+  Limonada is a desktop client for Lemmy, the federated link aggregator. Browse
+  a feed, communities and full comment threads from any instance; search posts,
+  comments, communities and users; and, once signed in, vote on posts and
+  comments and write comments and replies. Pictures open at the best resolution
+  the instance offers, including AVIF, decoded in pure Rust with no system codec.
+
+contact: lapisdecor@gmail.com
+issues: https://github.com/lapisdecor/limonada/issues
+source-code: https://github.com/lapisdecor/limonada
+website: https://github.com/lapisdecor/limonada
+
+grade: stable
+confinement: strict
+
+# Installed as meta/gui/icon.png, which is the icon the desktop entry names.
+icon: packaging/icons/com.gatochalupa.limonada-256.png
+
+apps:
+  limonada:
+    command: bin/limonada
+    # The GNOME extension supplies the desktop runtime as *content* snaps: the
+    # desktop-launch command chain, the desktop, desktop-legacy, wayland, x11 and
+    # opengl interfaces, and the gpu-2604 snap that carries the machine's own Mesa
+    # driver for wgpu and glow. Bundling a driver would pin the wrong one, exactly
+    # as in the .deb, the AppImage and the Flatpak.
+    extensions:
+      - gnome
+    plugs:
+      # The Lemmy API over HTTPS, and the linked page handed to the browser.
+      # Nothing else: settings live in $XDG_DATA_HOME/limonada, which inside the
+      # snap is ~/snap/limonada/current/.local/share/limonada and is persistent,
+      # so no `home` and no `filesystem` permission is needed.
+      - network
+
+parts:
+  limonada:
+    # Nothing else is installed: `cargo install` puts the binary in bin/ (which is
+    # what `command:` names), and the launcher entry and icon come from snap/gui/
+    # and the `icon:` key above. Measured: with and without the AppStream file,
+    # both icons and the README that an earlier version installed under usr/,
+    # meta/snap.yaml is byte-identical, so nothing reads them inside a snap.
+    plugin: rust
+    source: .

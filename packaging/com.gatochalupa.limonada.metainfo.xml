@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata, installed to /usr/share/metainfo so software centres can
+  describe the app.
+
+  The licence here is `AGPL-3.0-only` rather than the project's own
+  `AGPL-3.0-or-later`: a built binary includes the AVIF decoder, and `zenavif`
+  and the `rav1d-safe` decoder beneath it are AGPL-3.0-only, so no later version
+  can be granted for the distributed artifact. See the README's licence section.
+-->
+<component type="desktop-application">
+  <id>com.gatochalupa.limonada</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+
+  <name>Limonada</name>
+  <summary>Browse, search, vote and comment on Lemmy</summary>
+
+  <!-- A group, like the package metadata: `appstreamcli validate` wants a
+       developer, and no individual is named in this repository. -->
+  <developer id="com.gatochalupa">
+    <name>Limonada contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Limonada is a native desktop client for Lemmy, the federated link
+      aggregator. It talks to any Lemmy instance over the v3 API.
+    </p>
+    <p>
+      It browses a feed with sort and listing controls, scopes to a single
+      community, renders posts and their full comment threads with Markdown, and
+      shows a post's picture at the best resolution the instance offers —
+      including AVIF, decoded in pure Rust with no system codec.
+    </p>
+    <p>
+      Searching covers posts, comments, communities and users. Signing in to an
+      instance adds up and down voting on posts and comments, and writing
+      comments and replies. Browsing needs no account.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.gatochalupa.limonada.desktop</launchable>
+  <provides>
+    <binary>limonada</binary>
+  </provides>
+
+  <categories>
+    <category>Network</category>
+    <category>News</category>
+  </categories>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.2.0" date="2026-10-19"/>
+    <release version="0.1.0" date="2026-10-15"/>
+  </releases>
+</component>

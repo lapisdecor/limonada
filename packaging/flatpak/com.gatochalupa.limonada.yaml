@@ -1,0 +1,76 @@
+# Flatpak manifest for Limonada.
+#
+# Build with `make flatpak` (packaging/build-flatpak.sh), which runs
+# flatpak-builder and then packs the result into one installable .flatpak file.
+#
+# Two things shape this file:
+#
+# - **The build sandbox has no network.** Every crate in Cargo.lock is therefore
+#   declared as a source in `cargo-sources.json`, generated with
+#   flatpak-cargo-generator.py from https://github.com/flatpak/flatpak-builder-tools,
+#   and cargo builds against that vendored tree with `--offline`. Regenerate the
+#   file whenever Cargo.lock changes; the command is in packaging/README.md.
+# - **The runtime provides the graphics stack, the app does not ship one.**
+#   wgpu (or glow) opens the machine's own GL/Vulkan driver through
+#   `--device=dri`, exactly as the .deb and the AppImage do — bundling a driver
+#   would pin the wrong one.
+id: com.gatochalupa.limonada
+
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  # Cargo and rustc come from the SDK extension, not from the tree: the build
+  # has no network to rustup with.
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+command: limonada
+
+finish-args:
+  # The app talks to Lemmy instances over HTTPS and does nothing else on the
+  # network, and it opens a linked page in the user's browser on request.
+  - --share=network
+  # Rendering goes through the user's own graphics driver.
+  - --device=dri
+  - --socket=wayland
+  - --socket=fallback-x11
+  # X11 needs shared memory for a window that is not a slideshow.
+  - --share=ipc
+  # Settings live in $XDG_DATA_HOME/limonada, which inside the sandbox is
+  # ~/.var/app/com.gatochalupa.limonada/data — already persistent, so no
+  # --filesystem permission is needed or granted.
+
+modules:
+  - name: limonada
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        # The vendored tree and the cargo config that points at it are written
+        # into ./cargo by cargo-sources.json, and cargo only uses them when
+        # CARGO_HOME names that directory.
+        CARGO_HOME: /run/build/limonada/cargo
+    build-commands:
+      - cargo build --release --offline --locked
+      - install -Dm755 target/release/limonada /app/bin/limonada
+
+      # One source per file: the entry, the metadata and both icons are named
+      # after the app id in the tree — which is exactly what Flatpak wants, and
+      # what the .deb and the AppImage install — so they go in as they are,
+      # neither renamed nor patched here.
+      - install -Dm644 packaging/com.gatochalupa.limonada.desktop /app/share/applications/com.gatochalupa.limonada.desktop
+      - install -Dm644 packaging/com.gatochalupa.limonada.metainfo.xml /app/share/metainfo/com.gatochalupa.limonada.metainfo.xml
+      - install -Dm644 packaging/icons/com.gatochalupa.limonada-256.png /app/share/icons/hicolor/256x256/apps/com.gatochalupa.limonada.png
+      - install -Dm644 packaging/icons/com.gatochalupa.limonada.svg /app/share/icons/hicolor/scalable/apps/com.gatochalupa.limonada.svg
+      - install -Dm644 README.md /app/share/doc/com.gatochalupa.limonada/README.md
+    sources:
+      - type: dir
+        path: ../..
+        # Directory sources are copied wholesale and cannot be cached; these are
+        # the two directories that would make that copy enormous (and target/
+        # holds this very build).
+        skip:
+          - target
+          - .git
+      # Generated from Cargo.lock; see packaging/README.md.
+      - cargo-sources.json

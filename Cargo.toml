@@ -1,0 +1,125 @@
+[package]
+name = "limonada"
+version = "0.2.0"
+edition = "2024"
+description = "Limonada — a desktop client for Lemmy"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+# Deliberately a group rather than a person: no individual's name belongs in a
+# repository's metadata. A real package build names its own maintainer (see
+# `[package.metadata.deb]` and packaging/README.md).
+authors = ["Limonada contributors"]
+
+[dependencies]
+# Both renderers are compiled in on purpose: wgpu is the default, and the
+# `glow` backend is selectable at runtime (LIMONADA_RENDERER=glow) because
+# eframe's EFRAME_SCREENSHOT_TO render-proof path is glow-only in 0.36.2.
+eframe = { version = "0.36.2", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "links",
+    "persistence",
+    "wayland",
+    "wgpu",
+    "x11",
+] }
+egui = "0.36.2"
+egui_extras = { version = "0.36.2", features = [
+    "file",
+    "gif",
+    "http",
+    "image",
+    "svg",
+    "webp",
+] }
+# Required, and easy to omit by mistake: egui_extras decodes images through the
+# `image` crate but enables no formats itself, and eframe/arboard only enable
+# `png`. Without this line a JPEG — the most common thumbnail format on Lemmy —
+# is not "unsupported", it decodes to nothing, and egui draws an empty space
+# with no error anywhere. Cargo unifies features across the graph, so the
+# formats enabled here are exactly what egui_extras' loader can read.
+image = { version = "0.25", default-features = false, features = [
+    "gif",
+    "jpeg",
+    "png",
+    "webp",
+] }
+# AVIF, which instances do serve and neither egui nor `image` can read in this
+# build: `image`'s AVIF *decoder* is behind `avif-native`, which links the C
+# library libdav1d and so makes a system package (`libdav1d-dev`) a build
+# requirement — verified, dav1d-sys fails its build script without `dav1d.pc`.
+# `zenavif` decodes in pure Rust (via `rav1d-safe`), so AVIF works in a normal
+# `cargo build` with nothing extra installed. Measured on a real post: the
+# 4,623-byte AVIF in fixtures/pictures decodes to 440x536 in ~150 ms.
+zenavif = "0.1.6"
+# `zenavif` hands back a `zenpixels` buffer, and this is its documented
+# conversion to RGBA8 — what egui draws. Same feature set `zenavif` itself asks
+# for, so it adds no second decoder to the tree.
+zenpixels-convert = { version = "0.2", features = ["rgb"] }
+egui_commonmark = "0.25.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls-tls",
+] }
+
+[profile.release]
+opt-level = 2
+
+# ---------------------------------------------------------------------------
+# Packaging
+# ---------------------------------------------------------------------------
+#
+# `cargo deb` (cargo-deb) turns the release binary into a Debian package from
+# this table plus `packaging/`. `make deb` wraps it. See packaging/README.md.
+#
+# The maintainer is a placeholder on purpose — an upload needs a real name and
+# address, and neither belongs in the repository. Override it per build:
+#   make deb DEB_MAINTAINER='Your Name <you@example.org>'
+[package.metadata.deb]
+maintainer = "Limonada contributors <limonada@example.invalid>"
+copyright = "2026 Limonada contributors"
+section = "network"
+priority = "optional"
+# `$auto` resolves the shared libraries the binary actually links into Debian's
+# `Depends`. Measured on the built package, that is `libc6` alone: the binary
+# links only libc, libm and libgcc_s, and the windowing stack (libGL, libEGL,
+# libvulkan, libwayland-client, libX11, libxkbcommon) is loaded at *run* time by
+# `dlopen` rather than linked, so it cannot appear here.
+#
+# The AVIF decoder is compiled in — `zenavif` is pure Rust — so no codec
+# package appears either.
+depends = "$auto"
+extended-description = """\
+A native desktop client for Lemmy, the federated link aggregator. Browses a \
+feed, communities and full comment threads from any instance; searches posts, \
+comments, communities and users; and, once signed in, votes on posts and \
+comments and writes comments and replies. Pictures open at the best resolution \
+the instance offers, including AVIF, decoded in pure Rust with no system codec."""
+assets = [
+    ["target/release/limonada", "usr/bin/", "755"],
+    [
+        "packaging/com.gatochalupa.limonada.desktop",
+        "usr/share/applications/",
+        "644",
+    ],
+    [
+        "packaging/com.gatochalupa.limonada.metainfo.xml",
+        "usr/share/metainfo/",
+        "644",
+    ],
+    [
+        "packaging/icons/com.gatochalupa.limonada-256.png",
+        "usr/share/icons/hicolor/256x256/apps/com.gatochalupa.limonada.png",
+        "644",
+    ],
+    [
+        "packaging/icons/com.gatochalupa.limonada.svg",
+        "usr/share/icons/hicolor/scalable/apps/com.gatochalupa.limonada.svg",
+        "644",
+    ],
+    ["README.md", "usr/share/doc/limonada/README.md", "644"],
+]

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Limonada's icon: a lemon, matching the title bar. One line on purpose; see packaging/README.md. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Limonada">
+  <title>Limonada</title>
+  <defs>
+    <linearGradient id="rind" x1="0.15" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#f8e75a"/>
+      <stop offset="0.55" stop-color="#f0d22a"/>
+      <stop offset="1" stop-color="#d9a900"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Lemon body -->
+  <path
+    d="M128 44c36 0 66 22 79 55 4 11 4 23 0 34-2 5 2 9 5 13 5 7 3 17-5 22-6 4-14 3-19-2-7-6-14 1-22 6-14 8-31 11-48 9-38-5-67-33-74-71-1-6-1-12 0-18C47 72 60 54 78 43c15-9 32-10 50-10z"
+    fill="url(#rind)" stroke="#a87900" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- Leaf -->
+  <path
+    d="M151 32c15-11 36-13 53-5-9 17-28 28-47 26-7-1-12-4-15-10 3-5 6-8 9-11z"
+    fill="#4c9a2a" stroke="#316f18" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- Rind highlight -->
+  <path
+    d="M92 88c11-13 28-20 45-19-13 5-24 13-31 24-6 10-9 21-9 33-9-10-12-26-5-38z"
+    fill="#fff6b0" opacity="0.75"/>
+
+  <!-- Eyes and smile -->
+  <circle cx="103" cy="122" r="8" fill="#5b4a00"/>
+  <circle cx="152" cy="122" r="8" fill="#5b4a00"/>
+  <path
+    d="M103 152c10 15 31 21 48 14 6-3 11-7 15-12"
+    fill="none" stroke="#8a6d00" stroke-width="9" stroke-linecap="round"/>
+</svg>

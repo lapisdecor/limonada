@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Limonada
+GenericName=Lemmy client
+Comment=Browse, search, vote and comment on Lemmy
+# Snapcraft copies this file into the snap's meta/gui untouched. `Icon` is a path
+# rather than a theme name because a snap's icons are not in the host's theme,
+# and /snap/limonada/current rather than ${SNAP} because desktop-file-validate
+# rejects the second form as not absolute — both resolve at run time.
+# StartupWMClass is the app id the binary sets, as in the other three packages.
+Exec=limonada
+Icon=/snap/limonada/current/meta/gui/icon.png
+Terminal=false
+Categories=Network;News;
+StartupWMClass=com.gatochalupa.limonada
+Keywords=lemmy;feddit;fediverse;link aggregator;activitypub;
