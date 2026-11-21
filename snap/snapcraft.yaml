@@ -43,6 +43,19 @@ confinement: strict
 # Installed as meta/gui/icon.png, which is the icon the desktop entry names.
 icon: packaging/icons/com.gatochalupa.limonada-256.png
 
+# xkbcommon builds its compose table from $XLOCALEDIR, which the GPU content
+# snap's wrapper points at gpu-2604/mesa-2604/usr/share/X11/locale. Fifteen of
+# the Compose files there include the absolute
+# /usr/share/X11/locale/en_US.UTF-8/Compose, and the core26 base ships no X11
+# locale data, so every launch printed two xkbcommon errors and dropped the
+# table — which is what dead keys rely on. The core22 GPU extension exposed this
+# directory with a layout; the core26 one exposes only XErrorDB. A symlink rather
+# than a bind keeps startup cheap and needs no ordering against the content
+# mount, which only has to exist when a compose file is opened.
+layout:
+  /usr/share/X11/locale:
+    symlink: $SNAP/gpu-2604/mesa-2604/usr/share/X11/locale
+
 apps:
   limonada:
     command: bin/limonada

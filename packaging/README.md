@@ -189,18 +189,56 @@ app does not report.
 
 The desktop entry in `snap/gui/` is the snap's own entry — snapcraft only reads
 desktop entries from there — and it carries the same `Name`, `Exec` and
-`StartupWMClass` as `packaging/com.gatochalupa.limonada.desktop`. Its `Icon=`
-names a file, not a theme name: measured on the built snap, snapcraft copies the
-file into `meta/gui` untouched, so a bare name would be looked up in the host's
-icon theme — where a snap's icons are not — and leave the app with the generic
-icon. The path is `/snap/limonada/current/meta/gui/icon.png` rather than
-`${SNAP}/…`: both resolve at run time, but `desktop-file-validate` rejects the
-`${SNAP}` form as not absolute.
+`StartupWMClass` as `packaging/com.gatochalupa.limonada.desktop`. Its `Icon=` is
+`${SNAP}/meta/gui/icon.png`: a file, not a theme name, because a bare name would
+be looked up in the host's icon theme, where a snap's icons are not.
+
+The `${SNAP}` form is not cosmetic. Snapcraft copies the entry into `meta/gui`
+untouched, but snapd does **not** install that file: it writes a sanitised copy
+to `/var/lib/snapd/desktop/applications/` and **drops any `Icon=` path that is
+not under `${SNAP}`** (*icon path … is not part of the snap*). The absolute
+`/snap/limonada/current/meta/gui/icon.png` an earlier version used therefore
+produced an exported entry with no `Icon=` line at all — measured on the
+installed snap, which showed the generic icon — while snapd rewrites `${SNAP}`
+to that same path for every other snapped app on the machine. The catch is that
+`desktop-file-validate` rejects the unexpanded `${SNAP}` as not absolute, so it
+is run on a copy with the variable substituted.
+
+### The compose table and the GPU snap
+
+xkbcommon builds its compose table from `$XLOCALEDIR`, which the GPU content
+snap's wrapper points at `gpu-2604/mesa-2604/usr/share/X11/locale`. Fifteen of
+the `Compose` files there — `pt_PT.UTF-8` among them — include the absolute
+`/usr/share/X11/locale/en_US.UTF-8/Compose`, and the `core26` base ships no X11
+locale data at all. Every launch therefore printed
+
+```
+xkbcommon: ERROR: …/pt_PT.UTF-8/Compose:1:9: failed to open included Compose file "/usr/share/X11/locale/en_US.UTF-8/Compose": No such file or directory
+xkbcommon: ERROR: …/pt_PT.UTF-8/Compose:1:9: failed to parse file
+```
+
+and dropped the compose table — the thing dead keys and compose sequences use.
+The core22 GPU extension exposed this directory with a `/usr/share/X11/locale`
+layout; the core26 one exposes only `/usr/share/X11/XErrorDB`. The manifest adds
+the missing entry:
+
+```yaml
+layout:
+  /usr/share/X11/locale:
+    symlink: $SNAP/gpu-2604/mesa-2604/usr/share/X11/locale
+```
+
+A symlink rather than a bind: it costs nothing at startup and does not depend on
+the order in which snapd mounts the content snap and applies layouts, since the
+target only has to exist when a compose file is opened. Measured on the built
+snap: the entry survives into `meta/snap.yaml` beside the five the extension
+contributes, and the file the include names — `en_US.UTF-8/Compose`, 456,061
+bytes — is present in the mounted content snap.
 
 ### What was measured
 
 `make snap` wrote `target/limonada_0.2.0_amd64.snap` — 11,997,184 bytes, sha256
-`893d2bdb…`, holding **9 files**: the binary, the launcher entry, the icon that
+`754de5ef…`, holding **9 files**: the binary, the launcher entry, the icon that
 entry names, the four command-chain wrappers, `meta/snap.yaml` and the configure
 hook the GNOME extension adds. The file is `amd64`, not `x86_64`, because
 snapcraft names it after the snap architecture and the script names what it
@@ -216,11 +254,14 @@ not done here for consistency with the AppImage rather than by accident.
 Read back from the extracted tree rather than assumed: `meta/snap.yaml` carries
 the name, `title`, version, summary, description, `license: AGPL-3.0-only`,
 base, `confinement: strict`, the app's command chain (`gpu-2604-wrapper` then
-`desktop-launch`), the six plugs and the `gpu-2604`, `gnome-core26` and
-`gtk-common-themes` content plugs; `meta/gui/limonada.desktop` has
-`Exec=limonada`, `Icon=/snap/limonada/current/meta/gui/icon.png` and
-`StartupWMClass=com.gatochalupa.limonada`, and `desktop-file-validate` passes on
-it as it ends up inside the snap. That `meta/snap.yaml` is also byte-identical
+`desktop-launch`), the six plugs, the `gpu-2604`, `gnome-core26` and
+`gtk-common-themes` content plugs, and the `/usr/share/X11/locale` symlink
+layout; `meta/gui/limonada.desktop` has
+`Exec=limonada`, `Icon=${SNAP}/meta/gui/icon.png` and
+`StartupWMClass=com.gatochalupa.limonada`, and the icon that line resolves to is
+`meta/gui/icon.png` (15,704 bytes). `desktop-file-validate` passes on a copy
+with `${SNAP}` expanded to the installed path; the unexpanded form is not
+absolute and the validator rejects it. That `meta/snap.yaml` is also byte-identical
 (`diff`) to the one an earlier build produced while installing the AppStream
 file, both icons and the README under `usr/` — which is why this package carries
 none of them.

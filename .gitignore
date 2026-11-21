@@ -35,3 +35,6 @@
 *.png
 !packaging/icons/*.png
 !fixtures/**/*.png
+
+# snap
+*.snap
