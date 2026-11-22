@@ -8,7 +8,7 @@ the same source:
 | `.deb` | Debian, Ubuntu, Mint, Pop!_OS… | [`cargo-deb`](https://crates.io/crates/cargo-deb) |
 | `.AppImage` | any glibc distribution | [`appimagetool`](https://github.com/AppImage/appimagetool) |
 | `.flatpak` | any distribution with flatpak installed | [`flatpak-builder`](https://docs.flatpak.org) and the freedesktop 25.08 SDK |
-| `.snap` | any distribution with snapd | [`snapcraft`](https://snapcraft.io/snapcraft), and LXD for the default build provider |
+| `.snap` | any distribution with snapd | [`snapcraft`](https://snapcraft.io/snapcraft), LXD for the default build provider, and `squashfs-tools` for the script's architecture check |
 | `.zip` (Windows) | Windows 10/11 on x86-64 | mingw-w64, `rustup target add x86_64-pc-windows-gnu` |
 
 All are driven by `make` from the repository root:
@@ -237,16 +237,16 @@ bytes — is present in the mounted content snap.
 
 ### What was measured
 
-`make snap` wrote `target/limonada_0.2.0_amd64.snap` — 11,997,184 bytes, sha256
-`754de5ef…`, holding **9 files**: the binary, the launcher entry, the icon that
+`make snap` wrote `target/limonada_0.2.0_amd64.snap` — 12,001,280 bytes, sha256
+`f146f994…`, holding **9 files**: the binary, the launcher entry, the icon that
 entry names, the four command-chain wrappers, `meta/snap.yaml` and the configure
 hook the GNOME extension adds. The file is `amd64`, not `x86_64`, because
 snapcraft names it after the snap architecture and the script names what it
 writes the same way. Nothing is staged from the runtime, which is why it is that
 small; the snap installs its content snaps separately.
 
-The binary inside is 43,055,104 bytes, unstripped (`file` calls it *not
-stripped*, BuildID `183ba56a…`), the same size as the one the AppImage ships for
+The binary inside is 43,057,512 bytes, unstripped (`file` calls it *not stripped*,
+BuildID `bd603bea…`), the same size as the one the AppImage ships for
 the same reason: neither package strips. The `.deb` and the Flatpak do, at
 32 MB. Stripping a copy before installing it is the obvious saving, and it is
 not done here for consistency with the AppImage rather than by accident.
@@ -283,7 +283,9 @@ limonada: loaded 50 communities
 ```
 
 and was still running when `timeout` killed it after 20 s. That is the compiled
-artifact from inside the snap, not a `cargo run`.
+artifact from inside the snap, not a `cargo run`. The rebuilt package
+(BuildID `bd603bea…`) was launched the same way and also stayed up until
+`timeout` killed it, after 18 s.
 
 What that does **not** cover, and this is the one limit worth stating plainly:
 **the snap was never installed** — `snap install` needs root, and nothing here
@@ -295,6 +297,76 @@ icon and `StartupWMClass` pair on a real desktop, and that settings land in
 above was unconfined, on the host, with the host's libraries. Install it with
 `sudo snap install --dangerous target/limonada_0.2.0_amd64.snap` to check
 those; `--dangerous` is required because the snap is unsigned.
+
+### arm64
+
+The manifest declares two platforms, so the same source produces both builds:
+
+```bash
+ARCH=aarch64 make snap     # cross-build on an amd64 machine
+make snap                  # on an arm64 machine; amd64 on an amd64 machine
+```
+
+`build-snap.sh` passes `--build-for` on every run, which is not decoration: with
+a build plan holding both platforms, `snapcraft pack` on an amd64 host builds
+both and writes two snaps.
+
+Cross-building needs a linker and a C compiler for the target, because `ring` —
+reached through rustls — compiles C and assembly for the machine it will run on.
+Both are declared in the part's `build-packages` and both are native to the
+build machine (`gcc-aarch64-linux-gnu`, `libc6-dev-arm64-cross` from the amd64
+archive), so a cross build pulls nothing from the ports archive.
+
+The target goes into a `.cargo/config.toml` written into the pulled source, and
+that is measured rather than assumed. The rust plugin runs `cargo install`,
+which builds for the build machine, and `craftctl default` runs the plugin in
+snapcraft's own environment — variables exported by `override-build` never reach
+cargo. The first attempt did exactly that: `CARGO_BUILD_TARGET` exported, the
+pack succeeded, `limonada_0.2.0_arm64.snap` was written, and `file` on the binary
+inside said `ELF 64-bit LSB pie executable, x86-64`. snapcraft gives no sign of
+it, because the file name comes from the build plan and not from the code.
+`build-snap.sh` therefore reads the ELF header (`e_machine`) out of the packed
+snap and refuses to write one for the wrong machine — which is why it needs
+`unsquashfs`.
+
+#### What was measured (arm64)
+
+`ARCH=aarch64 make snap` wrote `target/limonada_0.2.0_arm64.snap` — 11,087,872
+bytes, sha256 `c71cafbf…`, holding the same nine files as the amd64 one. Read
+back from the extracted tree: `bin/limonada` is `ELF 64-bit LSB pie executable,
+ARM aarch64`, 39,329,936 bytes, `not stripped`, BuildID `87b3f635…`;
+`meta/snap.yaml` carries `architectures: [arm64]` and the
+`/usr/share/X11/locale` symlink layout beside the GNOME extension's own entries
+(it names `/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1` where the amd64 snap names
+`/usr/lib/x86_64-linux-gnu/…`); `meta/gui/limonada.desktop` has the same `Exec=`,
+`Icon=` and `StartupWMClass=` lines, and the icon it points at is the same
+15,704-byte file.
+
+The source was also compiled for aarch64 on this host and its test suite **run
+under `qemu-aarch64`**, with the arm64 loader and glibc from
+`/usr/aarch64-linux-gnu`: **143 tests passed, 6 ignored** (the `live_smoke`
+ones, which need a real instance) across the unit tests, `api_shapes`,
+`http_auth`, `image_formats` — AVIF through `rav1d-safe` included — `tree` and
+the headless UI renders.
+
+The packaged arm64 binary was launched under that same `qemu-aarch64`: it loads
+through the arm64 loader and runs as far as `winit`, which stops with
+`WaylandError(Connection(NoWaylandLib))` because this host's desktop is x86-64
+and has no aarch64 Wayland client library. There is no window to open here.
+
+What that does **not** cover, plainly: **no Raspberry Pi was available**, so the
+snap was not installed and the app was never seen running on ARM hardware. The
+wgpu change this build exists for — requesting `adapter.limits()` instead of
+wgpu's defaults, see `src/main.rs` — is therefore still unverified on the machine
+that reported `LimitsExceeded(FailedLimit { name: "max_color_attachments",
+requested: 8, allowed: 4 })`. On the Pi: `make snap`, then
+`sudo snap install --dangerous target/limonada_0.2.0_arm64.snap`, then
+`limonada`.
+
+One warning is expected on a cross build and is left as it is: the `library`
+linter prints `Unable to determine library dependencies for 'bin/limonada'`,
+because it resolves dependencies with the build machine's loader while these are
+arm64. The base carries them.
 
 ## Windows
 

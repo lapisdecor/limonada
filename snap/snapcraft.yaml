@@ -40,6 +40,19 @@ website: https://github.com/lapisdecor/limonada
 grade: stable
 confinement: strict
 
+# Two architectures, both built from this tree: amd64 natively, and arm64 either
+# by cross-compiling on an amd64 machine (`ARCH=aarch64 make snap`) or natively
+# on an arm64 one (plain `make snap`). The build script always passes
+# --build-for, because this build plan holds two platforms: on an amd64 host
+# snapcraft would otherwise build both and write two snaps per run.
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [amd64, arm64]
+    build-for: [arm64]
+
 # Installed as meta/gui/icon.png, which is the icon the desktop entry names.
 icon: packaging/icons/com.gatochalupa.limonada-256.png
 
@@ -82,3 +95,38 @@ parts:
     # meta/snap.yaml is byte-identical, so nothing reads them inside a snap.
     plugin: rust
     source: .
+    # Cross-building for arm64 needs a linker for the target, and some C: `ring`
+    # — reached through rustls for the Lemmy API — compiles C and assembly for
+    # the machine it will run on. Both packages are built for the *build*
+    # machine (an amd64 cross toolchain), so nothing comes from the ports
+    # archive; a native arm64 build installs the same pair and does not use it.
+    build-packages:
+      - gcc-aarch64-linux-gnu
+      - libc6-dev-arm64-cross
+    # The rust plugin runs plain `cargo install`, which builds for the build
+    # machine. Snapcraft exports only CRAFT_ARCH_* to a part, and `craftctl
+    # default` runs the plugin in snapcraft's own environment: variables exported
+    # by this script do not reach it. Measured the direct way first — with
+    # CARGO_BUILD_TARGET exported here the pack succeeded and produced
+    # limonada_0.2.0_arm64.snap holding an x86-64 binary — so the target goes
+    # into a cargo config in the pulled source, which cargo reads from the
+    # directory it runs in however it was started. `cargo install --root` still
+    # writes the binary to <root>/bin. A native build takes the `else` branch and
+    # is what it was before.
+    override-build: |
+      if [ "$CRAFT_ARCH_BUILD_FOR" != "$CRAFT_ARCH_BUILD_ON" ]; then
+        rustup target add aarch64-unknown-linux-gnu
+        mkdir -p .cargo
+        printf '%s\n' \
+          '[build]' \
+          'target = "aarch64-unknown-linux-gnu"' \
+          '' \
+          '[target.aarch64-unknown-linux-gnu]' \
+          'linker = "aarch64-linux-gnu-gcc"' \
+          '' \
+          '[env]' \
+          'CC_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-gcc"' \
+          'AR_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-ar"' \
+          > .cargo/config.toml
+      fi
+      craftctl default
