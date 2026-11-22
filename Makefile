@@ -10,7 +10,7 @@ CARGO ?= cargo
 # `cargo-deb` wants a Maintainer field. The default is a placeholder — override
 # it for a real release:
 #   make deb DEB_MAINTAINER='Your Name <you@example.org>'
-DEB_MAINTAINER ?= Limonada contributors <limonada@example.invalid>
+DEB_MAINTAINER ?= Luis Louro <lapisdecor@gmail.com>
 
 .PHONY: help build test lint run demo deb appimage flatpak snap windows dist clean
 
