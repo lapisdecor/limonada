@@ -147,7 +147,12 @@ required by crate `dav1d-sys` was not found"* without `dav1d.pc`, so a plain
 [`zenavif`](https://crates.io/crates/zenavif) — pure Rust, no system libraries —
 through the loader in [`src/avif.rs`](src/avif.rs). That loader is installed
 *after* `egui_extras`, which matters: egui asks the most recently added loader
-first, and every URI that is not AVIF is declined so egui_extras still gets it.
+first, and every image whose bytes are not AVIF is declined so egui_extras still
+gets it. AVIF is recognised from the container header, not from the URL, because
+a transcoding image proxy serves AVIF under whatever name it was asked for —
+`lemmy.zip` answers `image/avif` for a URL ending in `.jpeg` or in
+`/api/v3/image_proxy?url=…`, and judging by the extension left every one of those
+thumbnails blank.
 
 That choice was weighed, because AVIF decoders are usually heavy. Measured here:
 the AVIF packages are 52 crates nothing else in the tree needs, and they cold
@@ -485,7 +490,12 @@ a bug on the way:
    bytes and content type through unchanged — so a client without an AVIF decoder
    cannot show it by asking differently, it has to decode AVIF. For one such
    post the thumbnail was the very same AVIF URL, so there was no smaller copy to
-   fall back to either.
+   fall back to either. The URL is not the format either: `lemmy.zip`'s proxied
+   thumbnails redirect to `images.lemmy.zip`, which **transcodes** them to AVIF
+   and answers `image/avif` for a URL naming a `.jpeg` or carrying no extension
+   at all — two of two proxied thumbnails on a live feed. Judging AVIF by the
+   extension (or the `image` crate by the MIME) missed every one of those, so
+   `src/avif.rs` now sniffs the `ftyp` brand in the bytes.
 7. **AVIF only turns up in the top-of-day and top-of-week listings.** Scanning
    `New` and `Hot` found no AVIF at all — 300 posts across three instances, on
    two consecutive runs. That reads as a broken format detector, and it is not:

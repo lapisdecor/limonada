@@ -9,8 +9,22 @@
 //! of its own rather than a feature flag.
 //!
 //! The loader is installed *after* `egui_extras::install_image_loaders`, since
-//! egui asks the most recently added loader first; every URI that is not AVIF is
-//! declined with [`LoadError::NotSupported`], which hands it to egui_extras.
+//! egui asks the most recently added loader first; every image that turns out not
+//! to be AVIF is declined with [`LoadError::NotSupported`], which hands it to
+//! egui_extras in the same frame.
+//!
+//! **AVIF is recognised by its bytes, not by its URL.** An extension is not
+//! evidence, because instances front transcoding image proxies: `lemmy.zip`'s
+//! feed links thumbnails as `https://lemmy.zip/api/v3/image_proxy?url=…`, they
+//! redirect to `images.lemmy.zip`, and that host re-encodes every proxied picture
+//! as AVIF — answering `Content-Type: image/avif` even for a URL whose `url=`
+//! parameter names a `.jpeg` or `.webp`. Measured against a live `All` feed, two
+//! of two proxied thumbnails came back `image/avif`, and the loader stack drew
+//! nothing: this loader declined them for not ending in `.avif`, and egui_extras'
+//! refused the MIME because the `image` crate has no AVIF decoder
+//! (`NoMatchingImageLoader { detected_format: Some("image/avif") }`). So every
+//! network image is offered here first, and only bytes with an AVIF `ftyp` brand
+//! are decoded here.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,14 +44,45 @@ pub fn install(ctx: &Context) {
     }
 }
 
-/// Whether a URI is one this loader is responsible for.
+/// Whether a URI's *extension* says AVIF.
 ///
-/// Only the extension is available here: by the time an [`ImageLoader`] sees a
-/// URI, the content type a server sent has already been consumed by the byte
-/// loader. Lemmy serves AVIF from pictrs as `…/image/<uuid>.avif`, so the
-/// extension is enough in practice.
+/// This is a hint, not the decision: a transcoding image proxy serves AVIF under
+/// whatever name it was asked for (see [`could_be_avif`]). It still matters for
+/// `file://` URIs, where nothing re-encodes the file behind the path.
 pub fn is_avif(uri: &str) -> bool {
     egui::load::has_extension(uri, "avif")
+}
+
+/// Whether a URI is worth offering to the byte loader before deciding.
+///
+/// Every http(s) image qualifies: a proxy can turn any picture into AVIF while
+/// keeping the URL unchanged. `bytes://` is egui's own included-bytes namespace,
+/// used by the tests. Local `file://` URIs do not qualify — only an `.avif`
+/// extension claims them, since nothing on disk is silently re-encoded.
+fn could_be_avif(uri: &str) -> bool {
+    is_avif(uri)
+        || uri.starts_with("http://")
+        || uri.starts_with("https://")
+        || uri.starts_with("bytes://")
+}
+
+/// Whether these bytes begin an AVIF file, judged from the container header.
+///
+/// An ISO base media file starts with a box size, then `ftyp`, then its major
+/// brand and the brands it is compatible with — one of which is `avif` (still
+/// image) or `avis` (sequence). Checking that is cheap enough to run on every
+/// downloaded picture and needs no decoder: JPEG, PNG and WebP fail at `ftyp`.
+pub fn looks_like_avif(bytes: &[u8]) -> bool {
+    /// The brands sit right after `ftyp`, so this covers any real file; scanning
+    /// further would only read image data as if it were a brand.
+    const BRAND_SCAN: usize = 64;
+
+    if bytes.len() < 12 || &bytes[4..8] != b"ftyp" {
+        return false;
+    }
+    bytes[8..bytes.len().min(BRAND_SCAN)]
+        .windows(4)
+        .any(|brand| brand == b"avif" || brand == b"avis")
 }
 
 /// Decode an AVIF file to the RGBA8 pixels egui draws.
@@ -94,10 +139,6 @@ impl ImageLoader for AvifLoader {
     }
 
     fn load(&self, ctx: &Context, uri: &str, _size_hint: SizeHint) -> ImageLoadResult {
-        if !is_avif(uri) {
-            return Err(LoadError::NotSupported);
-        }
-
         if let Some(entry) = self.cache.lock().get(uri) {
             return match entry {
                 Entry::Decoding { size } => Ok(ImagePoll::Pending { size: *size }),
@@ -108,11 +149,21 @@ impl ImageLoader for AvifLoader {
             };
         }
 
+        if !could_be_avif(uri) {
+            return Err(LoadError::NotSupported);
+        }
+
         // First sighting: the bytes come from egui's own byte loaders — the HTTP
         // one from egui_extras, or the context's own included bytes — exactly as
         // egui_extras' loader gets them.
         match ctx.try_load_bytes(uri) {
             Ok(BytesPoll::Ready { bytes, .. }) => {
+                // The URL promised nothing, so the bytes are the only honest
+                // answer. Declining leaves them in the byte loader's cache, so
+                // egui_extras decodes them without a second request.
+                if !looks_like_avif(&bytes) {
+                    return Err(LoadError::NotSupported);
+                }
                 let size = size_of(&bytes);
                 self.cache
                     .lock()
@@ -199,6 +250,9 @@ mod tests {
     /// would have caught that.
     const REAL_AVIF: &[u8] = include_bytes!("../fixtures/pictures/avif-post.avif");
 
+    /// A PNG signature and chunk header: enough for the sniff to say "not AVIF".
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
     #[test]
     fn decodes_a_real_avif_to_rgba_pixels() {
         let image = decode(REAL_AVIF).expect("the captured AVIF should decode");
@@ -234,14 +288,39 @@ mod tests {
         assert_eq!(size_of(b"no header here"), None);
     }
 
+    /// The extension helper still names AVIF files, and still says no to the
+    /// URLs a transcoding proxy serves. The loader no longer relies on it.
     #[test]
-    fn only_avif_uris_are_claimed() {
+    fn the_extension_helper_names_only_avif_files() {
         assert!(is_avif("https://lemmy.zip/pictrs/image/abc.avif"));
         assert!(is_avif("https://example.org/a.AVIF"));
         assert!(is_avif("bytes://local.avif#frame=1"));
         assert!(!is_avif("https://lemmy.ml/pictrs/image/abc.png"));
         assert!(!is_avif("https://example.org/photo.avif.jpg"));
         assert!(!is_avif("https://example.org/no-extension"));
+    }
+
+    #[test]
+    fn avif_is_recognised_from_the_bytes() {
+        assert!(looks_like_avif(REAL_AVIF));
+        assert!(!looks_like_avif(b""));
+        assert!(!looks_like_avif(PNG));
+        assert!(!looks_like_avif(&REAL_AVIF[..6]));
+    }
+
+    /// The shipped bug: a proxy answered `image/avif` for a URL ending in `.webp`
+    /// (or with no extension at all), the extension said "not AVIF", egui_extras
+    /// refused the MIME, and the picture was blank.
+    #[test]
+    fn the_loader_answers_avif_served_under_a_different_name() {
+        let ctx = Context::default();
+        install(&ctx);
+        let uri = "bytes://api/v3/image_proxy?url=pictrs%2Fimage%2Fphoto.webp";
+        ctx.include_bytes(uri, REAL_AVIF.to_vec());
+
+        let loaded = poll_texture(&ctx, uri)
+            .expect("AVIF behind an image_proxy URL should decode despite the name");
+        assert_eq!(loaded, egui::vec2(440.0, 536.0));
     }
 
     /// The loader as egui uses it: a `bytes://` URI goes through the loader chain
@@ -257,7 +336,9 @@ mod tests {
         assert_eq!(loaded, egui::vec2(440.0, 536.0));
 
         // A URI another loader owns must be declined, or egui_extras would never
-        // get a chance at it.
+        // get a chance at it. Its bytes are registered so the decision is the
+        // sniff's rather than the byte loader's.
+        ctx.include_bytes("bytes://captured.png", PNG.to_vec());
         assert!(matches!(
             ctx.try_load_texture(
                 "bytes://captured.png",

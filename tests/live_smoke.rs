@@ -334,7 +334,9 @@ fn fetch(url: &str) -> Result<(Vec<u8>, String), String> {
 fn served_size(url: &str) -> (u32, u32) {
     let (bytes, mime) = fetch(url).unwrap_or_else(|e| panic!("{url} did not load: {e}"));
 
-    if limonada::avif::is_avif(url) {
+    // The bytes decide, not the URL: a transcoding image proxy answers AVIF for
+    // a `.jpeg` name or an extensionless one.
+    if limonada::avif::looks_like_avif(&bytes) {
         let image = limonada::avif::decode(&bytes)
             .unwrap_or_else(|e| panic!("{url} ({mime}) is AVIF and did not decode: {e}"));
         return (image.size[0] as u32, image.size[1] as u32);
@@ -343,6 +345,80 @@ fn served_size(url: &str) -> (u32, u32) {
     let decoded = image::load_from_memory(&bytes)
         .unwrap_or_else(|e| panic!("{url} ({mime}) did not decode: {e}"));
     (decoded.width(), decoded.height())
+}
+
+/// A transcoding image proxy serves AVIF under a URL that is not `.avif`, and the
+/// real loader stack has to render it.
+///
+/// Measured on `lemmy.zip`: its feed links thumbnails as
+/// `https://lemmy.zip/api/v3/image_proxy?url=…`, which redirect to
+/// `images.lemmy.zip` and come back `Content-Type: image/avif` even when the
+/// `url=` parameter names a `.jpeg` or `.webp`. Before the loader recognised AVIF
+/// from its bytes, every one of those thumbnails was blank — egui reported
+/// `NoMatchingImageLoader { detected_format: Some("image/avif") }`.
+///
+/// The assertion is that the picture renders, not that lemmy.zip still transcodes:
+/// if the proxy ever stops, the picture still renders and the test still passes.
+#[test]
+#[ignore = "requires network access to a live Lemmy instance"]
+fn a_transcoding_image_proxy_renders() {
+    use eframe::egui;
+
+    let client = LemmyClient::new(Arc::new(
+        HttpTransport::new("https://lemmy.zip").expect("instance URL should be usable"),
+    ));
+    let page = client
+        .list_posts(Sort::Hot, ListingType::All, None, 20)
+        .expect("GET lemmy.zip/api/v3/post/list");
+    let thumbnail = page
+        .posts
+        .iter()
+        .filter_map(inline_image_url)
+        .find(|url| url.contains("image_proxy"))
+        .unwrap_or_else(|| panic!("lemmy.zip's feed should carry a proxied thumbnail"))
+        .to_string();
+
+    let ctx = egui::Context::default();
+    egui_extras::install_image_loaders(&ctx);
+    limonada::avif::install(&ctx);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(400.0, 300.0),
+        )),
+        ..Default::default()
+    };
+
+    // The proxy transcodes on the first request, so allow more than the few
+    // seconds a static file needs: 60 polls a second for a minute.
+    let mut outcome = Err("timed out".to_string());
+    for _ in 0..1200 {
+        let mut output = ctx.run_ui(input.clone(), |ui| {
+            ui.add(egui::Image::new(&thumbnail));
+        });
+        output.textures_delta.clear();
+
+        match ctx.try_load_texture(
+            &thumbnail,
+            egui::TextureOptions::LINEAR,
+            egui::load::SizeHint::default(),
+        ) {
+            Ok(egui::load::TexturePoll::Ready { texture }) => {
+                outcome = Ok(format!("{}x{}", texture.size.x, texture.size.y));
+                break;
+            }
+            Ok(egui::load::TexturePoll::Pending { .. }) => {}
+            Err(err) => {
+                outcome = Err(format!("{err:?}"));
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let size = outcome.unwrap_or_else(|err| panic!("{thumbnail} did not render: {err}"));
+    println!("proxied thumbnail rendered at {size}: {thumbnail}");
 }
 
 /// The picture the viewer opens must be the higher-resolution one.

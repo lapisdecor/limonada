@@ -94,7 +94,9 @@ impl Limonada {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         // After egui_extras on purpose: egui asks the most recently added loader
         // first, and AVIF is this one's to decode — egui_extras' `image`-crate
-        // loader has no AVIF decoder and would fail on it.
+        // loader has no AVIF decoder and would fail on it. That loader decides by
+        // the bytes, not the extension, because a transcoding image proxy serves
+        // AVIF under a `.jpeg` or extensionless URL.
         crate::avif::install(&cc.egui_ctx);
 
         let settings = Settings::load(config_path().as_deref());
